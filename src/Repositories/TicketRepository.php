@@ -14,7 +14,7 @@ class TicketRepository implements TicketRepositoryInterface {
     
     public function save(Ticket $ticket): int {
         $stmt = $this->db->prepare(
-            "INSERT INTO tickets (event_id, customer_name, customer_email, quantity, total_amount, created_at) 
+            "INSERT INTO tickets (event_id, customer_name, customer_email, quantity, total_amount, purchase_date) 
              VALUES (?, ?, ?, ?, ?, NOW())"
         );
         
