@@ -219,7 +219,7 @@ try {
                             $sold = $stmt_sold->fetch()['sold'];
                             $available = $event['total_tickets'] - $sold;
                             ?>
-                            
+
                             <option value="<?php echo $event['id']; ?>" 
                                     data-price="<?php echo $event['price']; ?>"
                                     data-total="<?php echo $event['total_tickets']; ?>"
@@ -304,7 +304,6 @@ try {
             const loading = document.getElementById('loading');
             const messageContainer = document.getElementById('message-container');
             
-            // Show loading state
             submitBtn.disabled = true;
             loading.style.display = 'block';
             messageContainer.innerHTML = '';

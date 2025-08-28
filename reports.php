@@ -5,13 +5,11 @@ use TicketFairy\Config\Database;
 use TicketFairy\Repositories\EventRepository;
 use TicketFairy\Repositories\TicketRepository;
 
-// Fix: Use getInstance() instead of new Database()
 $database = Database::getInstance();
 $db = $database->getConnection();
 $eventRepo = new EventRepository($db);
 $ticketRepo = new TicketRepository($db);
 
-// Get reports data
 try {
     $reports = $ticketRepo->getTotalSoldByEvent();
 } catch (Exception $e) {
@@ -19,7 +17,6 @@ try {
     $reports = [];
 }
 
-// Calculate totals
 $totalRevenue = 0;
 $totalTicketsSold = 0;
 foreach ($reports as $report) {
