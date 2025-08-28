@@ -29,11 +29,20 @@ class Event {
     public function getPrice(): float { return $this->price; }
     
     public function getAvailableTickets(\PDO $db): int {
-        $stmt = $db->prepare(
-            "SELECT COALESCE(SUM(quantity), 0) as sold FROM tickets WHERE event_id = ?"
-        );
-        $stmt->execute([$this->id]);
-        $sold = $stmt->fetch()['sold'];
-        return $this->totalTickets - $sold;
+        try {
+            $stmt = $db->prepare(
+                "SELECT COALESCE(SUM(quantity), 0) as sold FROM tickets WHERE event_id = ?"
+            );
+            $stmt->execute([$this->id]);
+            $result = $stmt->fetch();
+            $sold = (int) ($result['sold'] ?? 0);
+            $available = $this->totalTickets - $sold;
+            
+            return max(0, $available);
+        } catch (\Exception $e) {
+            error_log("Error calculating available tickets for event {$this->id}: " . $e->getMessage());
+            
+            return 0;
+        }
     }
 }

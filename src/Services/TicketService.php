@@ -30,8 +30,11 @@ class TicketService {
                 throw new InvalidInputException("Event not found");
             }
             
-            $available = $event->getAvailableTickets($this->db);
-            if ($quantity > $available) {
+            $available = (int) $event->getAvailableTickets($this->db);
+            $requestedQuantity = (int) $quantity;
+            
+            if ($requestedQuantity > $available) {
+                $this->db->rollback();
                 throw new InsufficientTicketsException(
                     "Not enough tickets available. Only {$available} tickets left."
                 );
@@ -41,8 +44,8 @@ class TicketService {
                 'event_id' => $eventId,
                 'customer_name' => $customerName,
                 'customer_email' => $customerEmail,
-                'quantity' => $quantity,
-                'total_amount' => $quantity * $event->getPrice()
+                'quantity' => $requestedQuantity,
+                'total_amount' => $requestedQuantity * $event->getPrice()
             ]);
             
             $ticketId = $this->ticketRepo->save($ticket);
@@ -51,11 +54,20 @@ class TicketService {
             return [
                 'ticket_id' => $ticketId,
                 'event_name' => $event->getName(),
-                'quantity' => $quantity,
+                'quantity' => $requestedQuantity,
                 'total_amount' => $ticket->getTotalAmount()
             ];
+        } catch (InsufficientTicketsException | InvalidInputException $e) {
+            // Ensure transaction is rolled back for business logic exceptions
+            if ($this->db->inTransaction()) {
+                $this->db->rollback();
+            }
+            throw $e;
         } catch (\Exception $e) {
-            $this->db->rollback();
+            // Rollback for any other exception
+            if ($this->db->inTransaction()) {
+                $this->db->rollback();
+            }
             throw $e;
         }
     }
