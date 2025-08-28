@@ -1,223 +1,141 @@
 <?php
-require_once 'config/database.php';
+require_once 'vendor/autoload.php';
 
-class TicketPurchase {
-    private $db;
-    
-    public function __construct() {
-        $database = new Database();
-        $this->db = $database->getConnection();
-    }
-    
-    public function purchaseTickets($event_id, $customer_name, $customer_email, $quantity) {
-        try {
-            $this->db->beginTransaction();
-            
-            // Get event details with row lock to prevent race conditions
-            $stmt = $this->db->prepare("SELECT * FROM events WHERE id = ? FOR UPDATE");
-            $stmt->execute([$event_id]);
-            $event = $stmt->fetch();
-            
-            if (!$event) {
-                throw new Exception("Event not found");
-            }
-            
-            // Calculate total tickets sold for this event
-            $stmt = $this->db->prepare("SELECT COALESCE(SUM(quantity), 0) as sold FROM tickets WHERE event_id = ?");
-            $stmt->execute([$event_id]);
-            $sold = $stmt->fetch()['sold'];
-            
-            // Check if enough tickets are available
-            $available = $event['total_tickets'] - $sold;
-            if ($quantity > $available) {
-                throw new Exception("Not enough tickets available. Only {$available} tickets left.");
-            }
-            
-            if ($quantity <= 0) {
-                throw new Exception("Quantity must be greater than 0");
-            }
-            
-            if (!filter_var($customer_email, FILTER_VALIDATE_EMAIL)) {
-                throw new Exception("Invalid email address");
-            }
-            
-            // Calculate total amount
-            $total_amount = $quantity * $event['price'];
-            
-            // Insert ticket purchase
-            $stmt = $this->db->prepare(
-                "INSERT INTO tickets (event_id, customer_name, customer_email, quantity, total_amount) 
-                 VALUES (?, ?, ?, ?, ?)"
-            );
-            $stmt->execute([$event_id, $customer_name, $customer_email, $quantity, $total_amount]);
-            
-            // Commit transaction
-            $this->db->commit();
-            
-            return [
-                'success' => true,
-                'message' => 'Tickets purchased successfully',
-                'ticket_id' => $this->db->lastInsertId(),
-                'total_amount' => $total_amount
-            ];
-            
-        } catch (Exception $e) {
-            // Rollback transaction on error
-            $this->db->rollback();
-            return [
-                'success' => false,
-                'message' => $e->getMessage()
-            ];
-        }
-    }
-    
-    public function getAvailableTickets($event_id) {
-        try {
-            $stmt = $this->db->prepare(
-                "SELECT e.total_tickets, COALESCE(SUM(t.quantity), 0) as sold,
-                        (e.total_tickets - COALESCE(SUM(t.quantity), 0)) as available
-                 FROM events e
-                 LEFT JOIN tickets t ON e.id = t.event_id
-                 WHERE e.id = ?
-                 GROUP BY e.id"
-            );
-            $stmt->execute([$event_id]);
-            return $stmt->fetch();
-        } catch (Exception $e) {
-            return false;
-        }
-    }
-}
+use TicketFairy\Config\Database;
+use TicketFairy\Services\TicketService;
+use TicketFairy\Repositories\EventRepository;
+use TicketFairy\Repositories\TicketRepository;
+use TicketFairy\Exceptions\InsufficientTicketsException;
+use TicketFairy\Exceptions\InvalidInputException;
 
-// Handle POST request for ticket purchase
+$database = Database::getInstance();
+$db = $database->getConnection();
+$eventRepo = new EventRepository($db);
+$ticketRepo = new TicketRepository($db);
+$ticketService = new TicketService($db, $eventRepo, $ticketRepo);
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    header('Content-Type: application/json');
-    
-    $input = json_decode(file_get_contents('php://input'), true);
-    
-    $event_id = $input['event_id'] ?? null;
-    $customer_name = $input['customer_name'] ?? '';
-    $customer_email = $input['customer_email'] ?? '';
-    $quantity = $input['quantity'] ?? 0;
-    
-    $ticketPurchase = new TicketPurchase();
-    $result = $ticketPurchase->purchaseTickets($event_id, $customer_name, $customer_email, $quantity);
-    
-    echo json_encode($result);
-    exit;
+    try {
+        $event_id = (int) $_POST['event_id'];
+        $customer_name = trim($_POST['customer_name']);
+        $customer_email = trim($_POST['customer_email']);
+        $quantity = (int) $_POST['quantity'];
+        
+        $result = $ticketService->purchaseTickets($event_id, $customer_name, $customer_email, $quantity);
+        
+        $success_message = "Tickets purchased successfully! Ticket ID: {$result['ticket_id']}";
+    } catch (InsufficientTicketsException $e) {
+        $error_message = $e->getMessage();
+    } catch (InvalidInputException $e) {
+        $error_message = $e->getMessage();
+    } catch (Exception $e) {
+        $error_message = "An error occurred: " . $e->getMessage();
+    }
 }
 
-// Handle GET request for available tickets
-if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['event_id'])) {
-    header('Content-Type: application/json');
-    
-    $ticketPurchase = new TicketPurchase();
-    $result = $ticketPurchase->getAvailableTickets($_GET['event_id']);
-    
-    echo json_encode($result);
-    exit;
+// Get available events for the form
+try {
+    $stmt = $db->query("SELECT * FROM events WHERE event_date >= CURDATE() ORDER BY event_date");
+    $events = $stmt->fetchAll(PDO::FETCH_ASSOC);
+} catch (Exception $e) {
+    $events = [];
+    $error_message = "Could not load events: " . $e->getMessage();
 }
 ?>
 
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Ticket Purchase</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Purchase Tickets - TicketFairy</title>
     <style>
-        body { font-family: Arial, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
         .form-group { margin-bottom: 15px; }
         label { display: block; margin-bottom: 5px; font-weight: bold; }
-        input, select { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
-        button { background: #007cba; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; }
-        button:hover { background: #005a87; }
-        .message { padding: 10px; margin: 10px 0; border-radius: 4px; }
-        .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-        .error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        input, select, textarea { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
+        button { background-color: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; }
+        button:hover { background-color: #0056b3; }
+        .success { color: green; padding: 10px; background-color: #d4edda; border: 1px solid #c3e6cb; border-radius: 4px; margin-bottom: 20px; }
+        .error { color: red; padding: 10px; background-color: #f8d7da; border: 1px solid #f5c6cb; border-radius: 4px; margin-bottom: 20px; }
+        .event-info { background-color: #f8f9fa; padding: 10px; border-radius: 4px; margin-bottom: 10px; }
     </style>
 </head>
 <body>
     <h1>Purchase Tickets</h1>
     
-    <form id="purchaseForm">
+    <?php if (isset($success_message)): ?>
+        <div class="success"><?php echo htmlspecialchars($success_message); ?></div>
+    <?php endif; ?>
+    
+    <?php if (isset($error_message)): ?>
+        <div class="error"><?php echo htmlspecialchars($error_message); ?></div>
+    <?php endif; ?>
+    
+    <form method="POST">
         <div class="form-group">
-            <label for="event_id">Event ID:</label>
-            <input type="number" id="event_id" name="event_id" required>
+            <label for="event_id">Select Event:</label>
+            <select name="event_id" id="event_id" required onchange="updateEventInfo()">
+                <option value="">Choose an event...</option>
+                <?php foreach ($events as $event): ?>
+                    <option value="<?php echo $event['id']; ?>" 
+                            data-price="<?php echo $event['price']; ?>"
+                            data-total="<?php echo $event['total_tickets']; ?>"
+                            data-venue="<?php echo htmlspecialchars($event['venue']); ?>"
+                            data-date="<?php echo $event['event_date']; ?>">
+                        <?php echo htmlspecialchars($event['name']); ?> - $<?php echo number_format($event['price'], 2); ?>
+                    </option>
+                <?php endforeach; ?>
+            </select>
+        </div>
+        
+        <div id="event-info" class="event-info" style="display: none;">
+            <!-- Event details will be populated by JavaScript -->
         </div>
         
         <div class="form-group">
-            <label for="customer_name">Customer Name:</label>
-            <input type="text" id="customer_name" name="customer_name" required>
+            <label for="customer_name">Your Name:</label>
+            <input type="text" name="customer_name" id="customer_name" required>
         </div>
         
         <div class="form-group">
-            <label for="customer_email">Email:</label>
-            <input type="email" id="customer_email" name="customer_email" required>
+            <label for="customer_email">Your Email:</label>
+            <input type="email" name="customer_email" id="customer_email" required>
         </div>
         
         <div class="form-group">
-            <label for="quantity">Quantity:</label>
-            <input type="number" id="quantity" name="quantity" min="1" required>
+            <label for="quantity">Number of Tickets:</label>
+            <input type="number" name="quantity" id="quantity" min="1" required>
         </div>
         
         <button type="submit">Purchase Tickets</button>
-        <button type="button" onclick="checkAvailability()">Check Availability</button>
     </form>
     
-    <div id="message"></div>
+    <p><a href="reports.php">View Reports</a></p>
     
     <script>
-        document.getElementById('purchaseForm').addEventListener('submit', function(e) {
-            e.preventDefault();
+        function updateEventInfo() {
+            const select = document.getElementById('event_id');
+            const infoDiv = document.getElementById('event-info');
+            const option = select.options[select.selectedIndex];
             
-            const formData = {
-                event_id: document.getElementById('event_id').value,
-                customer_name: document.getElementById('customer_name').value,
-                customer_email: document.getElementById('customer_email').value,
-                quantity: parseInt(document.getElementById('quantity').value)
-            };
-            
-            fetch('purchase_ticket.php', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(formData)
-            })
-            .then(response => response.json())
-            .then(data => {
-                const messageDiv = document.getElementById('message');
-                messageDiv.className = 'message ' + (data.success ? 'success' : 'error');
-                messageDiv.innerHTML = data.message;
-                if (data.success) {
-                    messageDiv.innerHTML += `<br>Ticket ID: ${data.ticket_id}<br>Total Amount: $${data.total_amount}`;
-                    document.getElementById('purchaseForm').reset();
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-            });
-        });
-        
-        function checkAvailability() {
-            const eventId = document.getElementById('event_id').value;
-            if (!eventId) {
-                alert('Please enter an Event ID first');
-                return;
+            if (option.value) {
+                const price = option.getAttribute('data-price');
+                const total = option.getAttribute('data-total');
+                const venue = option.getAttribute('data-venue');
+                const date = option.getAttribute('data-date');
+                
+                infoDiv.innerHTML = `
+                    <strong>Event Details:</strong><br>
+                    Venue: ${venue}<br>
+                    Date: ${date}<br>
+                    Price per ticket: $${parseFloat(price).toFixed(2)}<br>
+                    Total tickets available: ${total}
+                `;
+                infoDiv.style.display = 'block';
+            } else {
+                infoDiv.style.display = 'none';
             }
-            
-            fetch(`purchase_ticket.php?event_id=${eventId}`)
-            .then(response => response.json())
-            .then(data => {
-                if (data) {
-                    const messageDiv = document.getElementById('message');
-                    messageDiv.className = 'message success';
-                    messageDiv.innerHTML = `Available tickets: ${data.available} / ${data.total_tickets}`;
-                } else {
-                    const messageDiv = document.getElementById('message');
-                    messageDiv.className = 'message error';
-                    messageDiv.innerHTML = 'Event not found';
-                }
-            });
         }
     </script>
 </body>

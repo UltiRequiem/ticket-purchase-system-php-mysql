@@ -9,6 +9,11 @@ class Database {
     private $connection;
     
     private function __construct() {
+        if (file_exists(__DIR__ . '/../../.env')) {
+            $dotenv = \Dotenv\Dotenv::createImmutable(__DIR__ . '/../..');
+            $dotenv->load();
+        }
+        
         $config = $this->getConfig();
         
         try {
@@ -43,12 +48,12 @@ class Database {
     
     private function getConfig(): array {
         return [
-            'host' => $_ENV['DB_HOST'] ?? 'localhost',
+            'host' => $_ENV['DB_HOST'] ?? 'db',
             'port' => $_ENV['DB_PORT'] ?? '3306',
-            'database' => $_ENV['DB_NAME'] ?? 'ticket_system',
-            'username' => $_ENV['DB_USER'] ?? 'root',
-            'password' => $_ENV['DB_PASS'] ?? '',
-            'charset' => $_ENV['DB_CHARSET'] ?? 'utf8mb4',
+            'database' => $_ENV['DB_DATABASE'] ?? 'ticket_fairy',
+            'username' => $_ENV['DB_USERNAME'] ?? 'root',
+            'password' => $_ENV['DB_PASSWORD'] ?? 'rootpassword',
+            'charset' => 'utf8mb4'
         ];
     }
 }

@@ -1,137 +1,100 @@
 <?php
-require_once 'config/database.php';
+require_once 'vendor/autoload.php';
 
-class TicketReports {
-    private $db;
-    
-    public function __construct() {
-        $database = new Database();
-        $this->db = $database->getConnection();
-    }
-    
-    public function getTotalTicketsSoldPerEvent() {
-        try {
-            $stmt = $this->db->prepare(
-                "SELECT 
-                    e.id,
-                    e.name,
-                    e.event_date,
-                    e.venue,
-                    e.total_tickets,
-                    e.price,
-                    COALESCE(SUM(t.quantity), 0) as tickets_sold,
-                    (e.total_tickets - COALESCE(SUM(t.quantity), 0)) as tickets_remaining,
-                    COALESCE(SUM(t.total_amount), 0) as total_revenue
-                 FROM events e
-                 LEFT JOIN tickets t ON e.id = t.event_id
-                 GROUP BY e.id, e.name, e.event_date, e.venue, e.total_tickets, e.price
-                 ORDER BY e.event_date DESC"
-            );
-            $stmt->execute();
-            return $stmt->fetchAll();
-        } catch (Exception $e) {
-            return [];
-        }
-    }
-    
-    public function getEventDetails($event_id) {
-        try {
-            $stmt = $this->db->prepare(
-                "SELECT 
-                    e.*,
-                    COALESCE(SUM(t.quantity), 0) as tickets_sold,
-                    COALESCE(SUM(t.total_amount), 0) as total_revenue
-                 FROM events e
-                 LEFT JOIN tickets t ON e.id = t.event_id
-                 WHERE e.id = ?
-                 GROUP BY e.id"
-            );
-            $stmt->execute([$event_id]);
-            return $stmt->fetch();
-        } catch (Exception $e) {
-            return null;
-        }
-    }
+use TicketFairy\Config\Database;
+use TicketFairy\Repositories\EventRepository;
+use TicketFairy\Repositories\TicketRepository;
+
+// Fix: Use getInstance() instead of new Database()
+$database = Database::getInstance();
+$db = $database->getConnection();
+$eventRepo = new EventRepository($db);
+$ticketRepo = new TicketRepository($db);
+
+// Get reports data
+try {
+    $reports = $ticketRepo->getTotalSoldByEvent();
+} catch (Exception $e) {
+    $error_message = "Could not load reports: " . $e->getMessage();
+    $reports = [];
 }
 
-$reports = new TicketReports();
-$events = $reports->getTotalTicketsSoldPerEvent();
+// Calculate totals
+$totalRevenue = 0;
+$totalTicketsSold = 0;
+foreach ($reports as $report) {
+    $totalRevenue += $report['total_sold'] * $report['price'] ?? 0;
+    $totalTicketsSold += $report['total_sold'];
+}
 ?>
 
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Ticket Sales Report</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ticket Sales Reports - TicketFairy</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 20px; }
+        body { font-family: Arial, sans-serif; max-width: 1200px; margin: 0 auto; padding: 20px; }
         table { width: 100%; border-collapse: collapse; margin-top: 20px; }
         th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
-        th { background-color: #f2f2f2; font-weight: bold; }
+        th { background-color: #f8f9fa; font-weight: bold; }
         tr:hover { background-color: #f5f5f5; }
-        .summary { background: #e7f3ff; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
-        .sold-out { background-color: #ffebee; }
-        .low-stock { background-color: #fff3e0; }
+        .summary { background-color: #e9ecef; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+        .summary h3 { margin-top: 0; }
+        .error { color: red; padding: 10px; background-color: #f8d7da; border: 1px solid #f5c6cb; border-radius: 4px; margin-bottom: 20px; }
+        .text-right { text-align: right; }
+        .text-center { text-align: center; }
     </style>
 </head>
 <body>
-    <h1>Ticket Sales Report</h1>
+    <h1>Ticket Sales Reports</h1>
+    
+    <?php if (isset($error_message)): ?>
+        <div class="error"><?php echo htmlspecialchars($error_message); ?></div>
+    <?php endif; ?>
     
     <div class="summary">
         <h3>Summary</h3>
-        <?php
-        $totalEvents = count($events);
-        $totalTicketsSold = array_sum(array_column($events, 'tickets_sold'));
-        $totalRevenue = array_sum(array_column($events, 'total_revenue'));
-        ?>
-        <p><strong>Total Events:</strong> <?= $totalEvents ?></p>
-        <p><strong>Total Tickets Sold:</strong> <?= $totalTicketsSold ?></p>
-        <p><strong>Total Revenue:</strong> $<?= number_format($totalRevenue, 2) ?></p>
+        <p><strong>Total Tickets Sold:</strong> <?php echo number_format($totalTicketsSold); ?></p>
+        <p><strong>Total Revenue:</strong> $<?php echo number_format($totalRevenue, 2); ?></p>
+        <p><strong>Total Events:</strong> <?php echo count($reports); ?></p>
     </div>
     
-    <table>
-        <thead>
-            <tr>
-                <th>Event ID</th>
-                <th>Event Name</th>
-                <th>Date</th>
-                <th>Venue</th>
-                <th>Price</th>
-                <th>Total Tickets</th>
-                <th>Sold</th>
-                <th>Remaining</th>
-                <th>Revenue</th>
-                <th>Status</th>
-            </tr>
-        </thead>
-        <tbody>
-            <?php foreach ($events as $event): ?>
-                <?php
-                $soldOut = $event['tickets_remaining'] == 0;
-                $lowStock = $event['tickets_remaining'] > 0 && $event['tickets_remaining'] <= ($event['total_tickets'] * 0.1);
-                $rowClass = $soldOut ? 'sold-out' : ($lowStock ? 'low-stock' : '');
-                ?>
-                <tr class="<?= $rowClass ?>">
-                    <td><?= htmlspecialchars($event['id']) ?></td>
-                    <td><?= htmlspecialchars($event['name']) ?></td>
-                    <td><?= date('M j, Y g:i A', strtotime($event['event_date'])) ?></td>
-                    <td><?= htmlspecialchars($event['venue']) ?></td>
-                    <td>$<?= number_format($event['price'], 2) ?></td>
-                    <td><?= $event['total_tickets'] ?></td>
-                    <td><?= $event['tickets_sold'] ?></td>
-                    <td><?= $event['tickets_remaining'] ?></td>
-                    <td>$<?= number_format($event['total_revenue'], 2) ?></td>
-                    <td>
-                        <?php if ($soldOut): ?>
-                            <span style="color: red; font-weight: bold;">SOLD OUT</span>
-                        <?php elseif ($lowStock): ?>
-                            <span style="color: orange; font-weight: bold;">LOW STOCK</span>
-                        <?php else: ?>
-                            <span style="color: green;">Available</span>
-                        <?php endif; ?>
-                    </td>
+    <h2>Sales by Event</h2>
+    
+    <?php if (empty($reports)): ?>
+        <p>No events found.</p>
+    <?php else: ?>
+        <table>
+            <thead>
+                <tr>
+                    <th>Event Name</th>
+                    <th>Event ID</th>
+                    <th class="text-right">Tickets Sold</th>
+                    <th class="text-right">Price per Ticket</th>
+                    <th class="text-right">Revenue</th>
                 </tr>
-            <?php endforeach; ?>
-        </tbody>
-    </table>
+            </thead>
+            <tbody>
+                <?php foreach ($reports as $report): ?>
+                    <?php 
+                        $revenue = ($report['total_sold'] ?? 0) * ($report['price'] ?? 0);
+                    ?>
+                    <tr>
+                        <td><?php echo htmlspecialchars($report['name']); ?></td>
+                        <td class="text-center"><?php echo $report['id']; ?></td>
+                        <td class="text-right"><?php echo number_format($report['total_sold'] ?? 0); ?></td>
+                        <td class="text-right">$<?php echo number_format($report['price'] ?? 0, 2); ?></td>
+                        <td class="text-right">$<?php echo number_format($revenue, 2); ?></td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+    <?php endif; ?>
+    
+    <p style="margin-top: 30px;">
+        <a href="purchase_ticket.php">← Back to Purchase Tickets</a>
+    </p>
 </body>
 </html>
