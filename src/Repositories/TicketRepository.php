@@ -43,10 +43,10 @@ class TicketRepository implements TicketRepositoryInterface {
     
     public function getTotalSoldByEvent(): array {
         $stmt = $this->db->query(
-            "SELECT e.name, e.id, COALESCE(SUM(t.quantity), 0) as total_sold 
+            "SELECT e.name, e.id, e.price, COALESCE(SUM(t.quantity), 0) as total_sold 
              FROM events e 
              LEFT JOIN tickets t ON e.id = t.event_id 
-             GROUP BY e.id, e.name"
+             GROUP BY e.id, e.name, e.price"
         );
         
         return $stmt->fetchAll(PDO::FETCH_ASSOC);

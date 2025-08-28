@@ -35,7 +35,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 // Get available events for the form
 try {
-    $stmt = $db->query("SELECT * FROM events WHERE event_date >= CURDATE() ORDER BY event_date");
+    $stmt = $db->query("SELECT * FROM events ORDER BY event_date");
     $events = $stmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (Exception $e) {
     $events = [];

@@ -23,7 +23,7 @@ try {
 $totalRevenue = 0;
 $totalTicketsSold = 0;
 foreach ($reports as $report) {
-    $totalRevenue += $report['total_sold'] * $report['price'] ?? 0;
+    $totalRevenue += $report['total_sold'] * ($report['price'] ?? 0);
     $totalTicketsSold += $report['total_sold'];
 }
 ?>
