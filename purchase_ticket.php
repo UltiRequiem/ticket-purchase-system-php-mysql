@@ -51,7 +51,6 @@ class TicketPurchase {
             );
             $stmt->execute([$event_id, $customer_name, $customer_email, $quantity, $total_amount]);
             
-            // Commit transaction
             $this->db->commit();
             
             return [
@@ -62,7 +61,6 @@ class TicketPurchase {
             ];
             
         } catch (Exception $e) {
-            // Rollback transaction on error
             $this->db->rollback();
             return [
                 'success' => false,
