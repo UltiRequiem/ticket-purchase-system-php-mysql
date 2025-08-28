@@ -204,9 +204,17 @@ try {
                     <select name="event_id" id="event_id" required onchange="updateEventInfo()">
                         <option value="">Choose an event...</option>
                         <?php foreach ($events as $event): ?>
+                            <?php
+                            // Calculate available tickets for this event
+                            $stmt_sold = $db->prepare("SELECT COALESCE(SUM(quantity), 0) as sold FROM tickets WHERE event_id = ?");
+                            $stmt_sold->execute([$event['id']]);
+                            $sold = $stmt_sold->fetch()['sold'];
+                            $available = $event['total_tickets'] - $sold;
+                            ?>
                             <option value="<?php echo $event['id']; ?>" 
                                     data-price="<?php echo $event['price']; ?>"
                                     data-total="<?php echo $event['total_tickets']; ?>"
+                                    data-available="<?php echo $available; ?>"
                                     data-venue="<?php echo htmlspecialchars($event['venue']); ?>"
                                     data-date="<?php echo $event['event_date']; ?>"
                                     data-description="<?php echo htmlspecialchars($event['description']); ?>">
@@ -254,6 +262,7 @@ try {
             if (option.value) {
                 const price = option.getAttribute('data-price');
                 const total = option.getAttribute('data-total');
+                const available = option.getAttribute('data-available');
                 const venue = option.getAttribute('data-venue');
                 const date = option.getAttribute('data-date');
                 const description = option.getAttribute('data-description');
@@ -264,7 +273,8 @@ try {
                     <strong>Venue:</strong> ${venue}<br>
                     <strong>Date:</strong> ${new Date(date).toLocaleString()}<br>
                     <strong>Price per ticket:</strong> $${parseFloat(price).toFixed(2)}<br>
-                    <strong>Total tickets available:</strong> ${total}
+                    <strong>Total tickets:</strong> ${total}<br>
+                    <strong>Available tickets:</strong> ${available}
                 `;
                 infoDiv.style.display = 'block';
             } else {
