@@ -1,4 +1,12 @@
 <?php
+ini_set('display_errors', 0);
+ini_set('log_errors', 1);
+error_reporting(E_ALL);
+
+set_error_handler(function($severity, $message, $file, $line) {
+    throw new ErrorException($message, 0, $severity, $file, $line);
+});
+
 require_once 'vendor/autoload.php';
 
 use TicketFairy\Config\Database;
@@ -9,19 +17,16 @@ use TicketFairy\Exceptions\InsufficientTicketsException;
 use TicketFairy\Exceptions\InvalidInputException;
 use TicketFairy\Exceptions\EventNotFoundException;
 
-$database = Database::getInstance();
-$db = $database->getConnection();
-$eventRepo = new EventRepository($db);
-$ticketRepo = new TicketRepository($db);
-$ticketService = new TicketService($db, $eventRepo, $ticketRepo);
-
-$error_message = '';
-$success_message = '';
-$error_type = 'general';
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
+    header('Content-Type: application/json');
+    
     try {
-        // Validate POST data exists
+        $database = Database::getInstance();
+        $db = $database->getConnection();
+        $eventRepo = new EventRepository($db);
+        $ticketRepo = new TicketRepository($db);
+        $ticketService = new TicketService($db, $eventRepo, $ticketRepo);
+        
         if (empty($_POST['event_id']) || empty($_POST['customer_name']) || 
             empty($_POST['customer_email']) || empty($_POST['quantity'])) {
             throw new InvalidInputException("All fields are required");
@@ -34,39 +39,59 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         $result = $ticketService->purchaseTickets($event_id, $customer_name, $customer_email, $quantity);
         
-        $success_message = "🎉 Tickets purchased successfully!<br>" .
-                          "<strong>Ticket ID:</strong> {$result['ticket_id']}<br>" .
-                          "<strong>Event:</strong> {$result['event_name']}<br>" .
-                          "<strong>Quantity:</strong> {$result['quantity']} tickets<br>" .
-                          "<strong>Total Amount:</strong> $" . number_format($result['total_amount'], 2);
+        echo json_encode([
+            'success' => true,
+            'message' => "🎉 Tickets purchased successfully!<br>" .
+                        "<strong>Ticket ID:</strong> {$result['ticket_id']}<br>" .
+                        "<strong>Event:</strong> {$result['event_name']}<br>" .
+                        "<strong>Quantity:</strong> {$result['quantity']} tickets<br>" .
+                        "<strong>Total Amount:</strong> $" . number_format($result['total_amount'], 2)
+        ]);
         
     } catch (InsufficientTicketsException $e) {
-        $error_message = "❌ " . $e->getMessage();
-        $error_type = 'insufficient';
+        echo json_encode([
+            'success' => false,
+            'message' => "❌ " . $e->getMessage(),
+            'type' => 'insufficient'
+        ]);
     } catch (InvalidInputException $e) {
-        $error_message = "⚠️ " . $e->getMessage();
-        $error_type = 'validation';
+        echo json_encode([
+            'success' => false,
+            'message' => "⚠️ " . $e->getMessage(),
+            'type' => 'validation'
+        ]);
     } catch (EventNotFoundException $e) {
-        $error_message = "🔍 " . $e->getMessage();
-        $error_type = 'not_found';
+        echo json_encode([
+            'success' => false,
+            'message' => "🔍 " . $e->getMessage(),
+            'type' => 'not_found'
+        ]);
     } catch (Exception $e) {
-        $error_message = "💥 An unexpected error occurred. Please try again later.";
-        $error_type = 'system';
-        // Log the actual error for debugging
+        echo json_encode([
+            'success' => false,
+            'message' => "💥 An unexpected error occurred. Please try again later.",
+            'type' => 'system'
+        ]);
         error_log("Ticket purchase error: " . $e->getMessage());
+    } catch (Error $e) {
+        echo json_encode([
+            'success' => false,
+            'message' => "💥 System error occurred. Please check your configuration.",
+            'type' => 'system'
+        ]);
+        error_log("Fatal error in ticket purchase: " . $e->getMessage());
     }
+    exit;
 }
 
-// Get available events for the form
 try {
+    $database = Database::getInstance();
+    $db = $database->getConnection();
     $stmt = $db->query("SELECT * FROM events ORDER BY event_date");
     $events = $stmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (Exception $e) {
     $events = [];
-    if (empty($error_message)) {
-        $error_message = "⚠️ Could not load events: " . $e->getMessage();
-        $error_type = 'system';
-    }
+    error_log("Error loading events: " . $e->getMessage());
 }
 ?>
 
@@ -100,15 +125,14 @@ try {
         input, select, textarea { 
             width: 100%; 
             padding: 12px; 
-            border: 2px solid #e9ecef; 
-            border-radius: 6px;
+            border: 2px solid #e9ecef;
+            border-radius: 6px; 
             font-size: 16px;
             transition: border-color 0.3s;
         }
-        input:focus, select:focus {
+        input:focus, select:focus, textarea:focus {
             outline: none;
             border-color: #007bff;
-            box-shadow: 0 0 0 3px rgba(0,123,255,0.1);
         }
         button { 
             background: linear-gradient(135deg, #007bff, #0056b3);
@@ -116,68 +140,59 @@ try {
             padding: 15px 30px; 
             border: none; 
             border-radius: 6px; 
-            cursor: pointer;
-            font-size: 16px;
+            cursor: pointer; 
+            font-size: 18px;
             font-weight: 600;
-            transition: transform 0.2s;
+            transition: all 0.3s;
+            width: 100%;
         }
         button:hover { 
             transform: translateY(-2px);
             box-shadow: 0 4px 12px rgba(0,123,255,0.3);
         }
-        .success { 
-            color: #155724;
+        button:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        .success, .error { 
             padding: 15px; 
-            background: linear-gradient(135deg, #d4edda, #c3e6cb);
-            border: 1px solid #c3e6cb; 
-            border-radius: 8px; 
-            margin-bottom: 20px;
-            border-left: 5px solid #28a745;
+            margin: 20px 0; 
+            border-radius: 6px; 
+            font-weight: 500;
+        }
+        .success { 
+            background-color: #d4edda; 
+            color: #155724; 
+            border: 1px solid #c3e6cb;
         }
         .error { 
-            color: #721c24;
-            padding: 15px; 
-            background: linear-gradient(135deg, #f8d7da, #f5c6cb);
-            border: 1px solid #f5c6cb; 
-            border-radius: 8px; 
-            margin-bottom: 20px;
-            border-left: 5px solid #dc3545;
+            background-color: #f8d7da; 
+            color: #721c24; 
+            border: 1px solid #f5c6cb;
         }
-        .error.insufficient {
-            border-left-color: #fd7e14;
-            background: linear-gradient(135deg, #fff3cd, #ffeaa7);
-            color: #856404;
+        .error.insufficient { background-color: #fff3cd; color: #856404; border-color: #ffeaa7; }
+        .error.validation { background-color: #f8d7da; color: #721c24; border-color: #f5c6cb; }
+        .error.not_found { background-color: #d1ecf1; color: #0c5460; border-color: #bee5eb; }
+        .error.system { background-color: #f8d7da; color: #721c24; border-color: #f5c6cb; }
+        .event-info {
+            background-color: #e7f3ff;
+            border: 1px solid #b8daff;
+            border-radius: 6px;
+            padding: 15px;
+            margin-top: 10px;
         }
-        .error.validation {
-            border-left-color: #6f42c1;
-            background: linear-gradient(135deg, #e2d9f3, #d1c4e9);
-            color: #4a148c;
-        }
-        .event-info { 
-            background: linear-gradient(135deg, #f8f9fa, #e9ecef);
-            padding: 15px; 
-            border-radius: 8px; 
-            margin-bottom: 15px;
-            border-left: 4px solid #007bff;
-        }
-        h1 {
-            color: #333;
-            text-align: center;
+        h1 { 
+            color: #333; 
+            text-align: center; 
             margin-bottom: 30px;
             font-size: 2.5em;
         }
-        .nav-link {
-            display: inline-block;
-            margin-top: 20px;
-            padding: 10px 20px;
-            background-color: #6c757d;
-            color: white;
-            text-decoration: none;
-            border-radius: 6px;
-            transition: background-color 0.3s;
-        }
-        .nav-link:hover {
-            background-color: #5a6268;
+        .loading {
+            display: none;
+            text-align: center;
+            color: #007bff;
         }
     </style>
 </head>
@@ -185,32 +200,26 @@ try {
     <div class="container">
         <h1>🎫 Purchase Tickets</h1>
         
-        <?php if (!empty($success_message)): ?>
-            <div class="success"><?php echo $success_message; ?></div>
-        <?php endif; ?>
-        
-        <?php if (!empty($error_message)): ?>
-            <div class="error <?php echo $error_type; ?>"><?php echo $error_message; ?></div>
-        <?php endif; ?>
+        <div id="message-container"></div>
         
         <?php if (empty($events)): ?>
             <div class="error system">
                 ⚠️ No events available. Please check back later or contact support.
             </div>
         <?php else: ?>
-            <form method="POST">
+            <form id="ticket-form">
                 <div class="form-group">
                     <label for="event_id">🎭 Select Event:</label>
                     <select name="event_id" id="event_id" required onchange="updateEventInfo()">
                         <option value="">Choose an event...</option>
                         <?php foreach ($events as $event): ?>
                             <?php
-                            // Calculate available tickets for this event
                             $stmt_sold = $db->prepare("SELECT COALESCE(SUM(quantity), 0) as sold FROM tickets WHERE event_id = ?");
                             $stmt_sold->execute([$event['id']]);
                             $sold = $stmt_sold->fetch()['sold'];
                             $available = $event['total_tickets'] - $sold;
                             ?>
+                            
                             <option value="<?php echo $event['id']; ?>" 
                                     data-price="<?php echo $event['price']; ?>"
                                     data-total="<?php echo $event['total_tickets']; ?>"
@@ -229,30 +238,32 @@ try {
                 </div>
                 
                 <div class="form-group">
-                    <label for="customer_name">👤 Your Name:</label>
+                    <label for="customer_name">👤 Full Name:</label>
                     <input type="text" name="customer_name" id="customer_name" required 
-                           value="<?php echo isset($_POST['customer_name']) ? htmlspecialchars($_POST['customer_name']) : ''; ?>">
+                           placeholder="Enter your full name">
                 </div>
                 
                 <div class="form-group">
-                    <label for="customer_email">📧 Your Email:</label>
-                    <input type="email" name="customer_email" id="customer_email" required
-                           value="<?php echo isset($_POST['customer_email']) ? htmlspecialchars($_POST['customer_email']) : ''; ?>">
+                    <label for="customer_email">📧 Email Address:</label>
+                    <input type="email" name="customer_email" id="customer_email" required 
+                           placeholder="Enter your email address">
                 </div>
                 
                 <div class="form-group">
                     <label for="quantity">🎟️ Number of Tickets:</label>
-                    <input type="number" name="quantity" id="quantity" min="1"  required
-                           value="<?php echo isset($_POST['quantity']) ? (int)$_POST['quantity'] : ''; ?>">
+                    <input type="number" name="quantity" id="quantity" min="1" required 
+                           placeholder="How many tickets?">
                 </div>
                 
-                <button type="submit">🛒 Purchase Tickets</button>
+                <div class="loading" id="loading">
+                    🔄 Processing your purchase...
+                </div>
+                
+                <button type="submit" id="submit-btn">🛒 Purchase Tickets</button>
             </form>
         <?php endif; ?>
-        
-        <a href="reports.php" class="nav-link">📊 View Reports</a>
     </div>
-    
+
     <script>
         function updateEventInfo() {
             const select = document.getElementById('event_id');
@@ -282,13 +293,47 @@ try {
             }
         }
         
-        // Preserve form state after error
-        <?php if (isset($_POST['event_id']) && !empty($error_message)): ?>
-            document.addEventListener('DOMContentLoaded', function() {
-                document.getElementById('event_id').value = '<?php echo (int)$_POST['event_id']; ?>';
-                updateEventInfo();
+        // Handle form submission with AJAX
+        document.getElementById('ticket-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData(this);
+            formData.append('ajax', '1');
+            
+            const submitBtn = document.getElementById('submit-btn');
+            const loading = document.getElementById('loading');
+            const messageContainer = document.getElementById('message-container');
+            
+            // Show loading state
+            submitBtn.disabled = true;
+            loading.style.display = 'block';
+            messageContainer.innerHTML = '';
+            
+            fetch(window.location.href, {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    messageContainer.innerHTML = `<div class="success">${data.message}</div>`;
+                    // Reset form on success
+                    document.getElementById('ticket-form').reset();
+                    document.getElementById('event-info').style.display = 'none';
+                } else {
+                    messageContainer.innerHTML = `<div class="error ${data.type || 'system'}">${data.message}</div>`;
+                }
+            })
+            .catch(error => {
+                messageContainer.innerHTML = `<div class="error system">💥 Network error occurred. Please check your connection and try again.</div>`;
+                console.error('Error:', error);
+            })
+            .finally(() => {
+                // Hide loading state
+                submitBtn.disabled = false;
+                loading.style.display = 'none';
             });
-        <?php endif; ?>
+        });
     </script>
 </body>
 </html>
