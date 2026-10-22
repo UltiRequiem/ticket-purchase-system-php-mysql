@@ -1,3 +1,3 @@
 # Ticket Purchase System
 
-Basic PHP Script.
+Basic PHP Project.
